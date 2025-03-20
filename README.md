@@ -2,6 +2,7 @@
 
 This project generates Ethereum wallets, checks their balances and transaction counts, and saves the wallet information if certain conditions are met. It also plays an alert sound when a wallet with a balance or transactions is found.
 
+**This is meant to be used with Helios Light Client & run it locally to avoid rate limits, currently working with 10 queries per second with no dropped connections**
 ## Features
 
 - Generates Ethereum wallets using a 12-word mnemonic phrase.
