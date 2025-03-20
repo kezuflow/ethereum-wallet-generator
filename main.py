@@ -7,9 +7,9 @@ from web3 import AsyncWeb3
 from web3.providers.async_rpc import AsyncHTTPProvider
 from eth_account import Account
 from mnemonic import Mnemonic
-from playsound import playsound  # Import playsound for playing sound
+from hashlib import pbkdf2_hmac
+from playsound import playsound
 import os
-
 
 # Helios RPC endpoint
 HELIOS_URL = "http://127.0.0.1:8545"
@@ -31,16 +31,45 @@ signal.signal(signal.SIGINT, signal_handler)
 
 
 def generate_mnemonic():
-    """Generates a 12-word mnemonic phrase."""
+    """Generates a 12-word mnemonic phrase using BIP-39."""
     mnemo = Mnemonic("english")
     return mnemo.generate(strength=128)
 
 
-def mnemonic_to_private_key(mnemonic):
-    """Generates a private key from a mnemonic phrase."""
-    seed = Mnemonic.to_seed(mnemonic)
-    account = Account.from_mnemonic(mnemonic)
-    return account._private_key.hex(), account.address  # Changed privateKey to _private_key
+def mnemonic_to_seed(mnemonic, passphrase=""):
+    """
+    Converts a mnemonic phrase to a seed using PBKDF2 with HMAC-SHA512.
+    This matches MetaMask's seed generation process.
+    """
+    # BIP-39 specifies "mnemonic" + passphrase as the salt
+    salt = "mnemonic" + passphrase
+    # PBKDF2 with HMAC-SHA512, 2048 iterations, 64-byte seed
+    seed = pbkdf2_hmac("sha512", mnemonic.encode("utf-8"), salt.encode("utf-8"), 2048, 64)
+    return seed.hex()
+
+
+def derive_private_key_and_address(seed):
+    """
+    Derives the private key and address from the seed using BIP-44.
+    This matches MetaMask's derivation process.
+    """
+    # Derive the master key using BIP-32
+    from bip_utils import Bip32Slip10Ed25519, Bip44, Bip44Coins, Bip44Changes
+
+    # Convert the seed from hex to bytes
+    seed_bytes = bytes.fromhex(seed)
+
+    # Derive the BIP-44 wallet for Ethereum
+    bip44_mst_ctx = Bip44.FromSeed(seed_bytes, Bip44Coins.ETHEREUM)
+    bip44_acc_ctx = bip44_mst_ctx.Purpose().Coin().Account(0)
+    bip44_chg_ctx = bip44_acc_ctx.Change(Bip44Changes.CHAIN_EXT)
+    bip44_addr_ctx = bip44_chg_ctx.AddressIndex(0)
+
+    # Get the private key and address
+    private_key = bip44_addr_ctx.PrivateKey().Raw().ToHex()
+    address = bip44_addr_ctx.PublicKey().ToAddress()
+
+    return private_key, address
 
 
 async def check_balance(address):
@@ -76,7 +105,8 @@ async def save_to_file(wallet_info):
 async def generate_wallet():
     """Generates a new wallet and checks its balance and transaction count."""
     mnemonic = generate_mnemonic()
-    private_key, address = mnemonic_to_private_key(mnemonic)
+    seed = mnemonic_to_seed(mnemonic)  # Generate seed using PBKDF2 with HMAC-SHA512
+    private_key, address = derive_private_key_and_address(seed)  # Derive private key and address
 
     balance = await check_balance(address)
     transaction_count = await check_transaction_count(address)
